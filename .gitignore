@@ -1,3 +1,4 @@
 # Ignore all PDF files
 *.pdf
 .DS_Store
+.Rhistory
