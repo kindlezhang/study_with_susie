@@ -1,0 +1,73 @@
+---
+title: "Untitled"
+output: github_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+```
+
+```{r}
+library(tidyverse)
+library(mvtnorm)
+```
+
+we generate a 
+
+```{r}
+
+```
+
+we generate
+
+# dependent WLS/GLS
+
+```{r}
+genData_cor_balance = 
+    function(K, nT, qX2, betaV, sigSq, tauSq) {
+    ##
+    X1.ki = rep(1:nT, K)
+    X2.ki = rep(rep(c(0, 1), c(K - round(K * qX2), round(K * qX2))), rep(nT, K))
+    eta.ki = matrix(
+        cbind(1, X1.ki, X2.ki) %*% betaV,
+        nrow = K,
+        ncol = nT,
+        byrow = TRUE
+    )
+    ##
+    Sigma0 = matrix(tauSq, nrow = nT, ncol = nT)
+    diag(Sigma0) = tauSq + sigSq
+    
+    ##
+    Y.ki = matrix(NA, nrow = K, ncol = nT)
+    for (k in 1:K) {
+        Y.ki[k, ] = rmvnorm(1, mean = eta.ki[k, ], sigma = Sigma0)
+    }
+  
+    ##
+    return(data.frame(
+        id = rep(1:K, rep(nT, K)),
+        X1 = X1.ki,
+        x2 = x2.ki,
+        Y = c(t(Y.ki))
+    ))
+}
+```
+
+```{r}
+K = 30
+nT = 4
+qX2 = 0.5
+betaV = c(0, 1, 1)
+sigSq = 0.5
+tauSq = 0.5
+  
+simData = genData_cor_balance(
+  K = 30,
+  nT = 4,
+  qX2 = 0.5,
+  betaV = c(0, 1, 1),
+  sigSq = 0.5,
+  tauSq = 0.5
+)
+```

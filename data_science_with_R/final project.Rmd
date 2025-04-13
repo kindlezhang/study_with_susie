@@ -1,0 +1,132 @@
+---
+title: "final project"
+author: "Kindle Zhang qz2527"
+date: "2024-12-02"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,
+                      warning = FALSE,
+                      message = FALSE)
+library(tidyverse)
+library(mvtnorm)
+```
+
+In this project, talk different scenarios and compare different models.
+use cams data.
+
+# independent OLS
+
+```{r}
+load("../../data_file/MACS.RData")
+
+Y = macs$cd4
+X_matrix = cbind(1, macs[, 2:7]) |>
+  as.matrix()
+
+beta_ols = solve((t(X_matrix) %*% X_matrix)) %*% t(X_matrix) %*% Y
+
+Y_hat = X_matrix%*%beta_ols
+
+res = Y - Y_hat
+
+sigmasqur = 1/(nrow(macs)-ncol(X_matrix)-1)*sum(res^2)
+
+sigma = sqrt(sigmasqur)
+
+# sd(Y)
+# is just the situation when there is only one parameter(intercept),
+# the y_hat is y mean
+# sqrt(1/(nrow(macs)-1)*sum((Y-mean(Y))^2))
+
+cov_beta = sigmasqur*solve((t(X_matrix) %*% X_matrix))
+
+lm_model = lm(cd4 ~ ., data = macs[,2:8])
+summary(lm_model)
+vcov(lm_model)
+anova(lm_model)
+
+# all.equal(vcov(lm_model),cov_beta)
+
+# X = model.matrix(lm_model)
+# residuals = resid(lm_model)
+# 
+# Omega = diag(residuals^2)
+# 
+# cov_matrix_manual = solve(t(X) %*% X) %*% (t(X) %*% Omega %*% X) %*% solve(t(X) %*% X)
+```
+
+# independent WLS/GLS
+
+```{r}
+
+```
+
+# dependent OLS(Two stage)
+
+```{r}
+
+```
+
+# dependent OLS
+
+```{r}
+
+```
+
+# dependent WLS/GLS
+
+```{r}
+genData = function(K, nT, qX2, betaV, sigSq, tauSq) {
+  ##
+  X1.ki = rep(1:nT, K)
+  X2.ki = rep(rep(c(0, 1), c(K - round(K * qX2), round(K * qX2))), rep(nT, K))
+  eta.ki = matrix(
+    cbind(1, X1.ki, X2.ki) %*% betaV,
+    nrow = K,
+    ncol = nT,
+    byrow = TRUE
+  )
+  ##
+  Sigma0 = matrix(tauSq, nrow = nT, ncol = nT)
+  diag(Sigma0) = tauSq + sigSq
+  
+  ##
+  Y.ki = matrix(NA, nrow = K, ncol = nT)
+  for (k in 1:K) {
+    Y.ki[k, ] = rmvnorm(1, mean = eta.ki[k, ], sigma = Sigma0)
+  }
+  
+  ##
+  return(data.frame(
+    id = rep(1:K, rep(nT, K)),
+    X1 = X1.ki,
+    x2 = x2.ki,
+    Y = c(t(Y.ki))
+  ))
+}
+```
+```{r}
+K = 30
+nT = 4
+qX2 = 0.5
+betaV = c(0, 1, 1)
+sigSq = 0.5
+tauSq = 0.5
+  
+# simData = genData(
+#   K = 30,
+#   nT = 4,
+#   qX2 = 0.5,
+#   betaV = c(0, 1, 1),
+#   sigSq = 0.5,
+#   tauSq = 0.5
+# )
+```
+
+```{r}
+
+```
+
+
