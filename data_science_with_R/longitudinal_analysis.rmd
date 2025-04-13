@@ -15,7 +15,45 @@ library(mvtnorm)
 we generate a 
 
 ```{r}
+gendata_uncor <-
+  function(k, beta, sigma) {
+    X_1 <- round(runif(k, 10, 100))
+    X_2 <- rbinom(k, 1, 0.5)
+    err <- rnorm(k, 0, sigma^2)
+    Y <- cbind(1, X_1, X_2) %*% beta + err
+    # Y <- beta[1] + beta[2] * X_1 + beta[3] * X_2 + err
 
+    return(data.frame(
+      id = rep(1:k, 1),
+      X1 = X_1,
+      X2 = X_2,
+      Y = Y
+    ))
+  }
+```
+
+```{r}
+data_1 <- gendata_uncor(1000, c(1, 2, 3), sigma = 1)
+```
+```{r}
+model <- lm(Y ~ X1 + X2, data = data_1)
+model
+vcov(model)
+```
+
+```{r}
+x_matrix <- data_1[, c(2, 3)] |> as.matrix()
+x_matrix <- cbind(1, x_matrix)
+y <- data_1$Y
+beta_ols <- solve(t(x_matrix) %*% x_matrix) %*% t(x_matrix) %*% y
+beta_ols
+
+res <- resid(model)
+n <- length(res)
+p <- length(coef(model))
+sigma2_hat <- sum(res^2) / (n - p) # RMSE
+cov_ols <- sigma2_hat * solve(t(x_matrix) %*% x_matrix)
+cov_ols
 ```
 
 we generate
@@ -23,46 +61,46 @@ we generate
 # dependent WLS/GLS
 
 ```{r}
-genData_cor_balance = 
-    function(K, nT, qX2, betaV, sigSq, tauSq) {
+gendata_cor_balance <-
+  function(K, nT, qX2, betaV, sigSq, tauSq) {
     ##
-    X1.ki = rep(1:nT, K)
-    X2.ki = rep(rep(c(0, 1), c(K - round(K * qX2), round(K * qX2))), rep(nT, K))
-    eta.ki = matrix(
-        cbind(1, X1.ki, X2.ki) %*% betaV,
-        nrow = K,
-        ncol = nT,
-        byrow = TRUE
+    X1.ki <- rep(1:nT, K)
+    X2.ki <- rep(rep(c(0, 1), c(K - round(K * qX2), round(K * qX2))), rep(nT, K))
+    eta.ki <- matrix(
+      cbind(1, X1.ki, X2.ki) %*% betaV,
+      nrow = K,
+      ncol = nT,
+      byrow = TRUE
     )
     ##
-    Sigma0 = matrix(tauSq, nrow = nT, ncol = nT)
-    diag(Sigma0) = tauSq + sigSq
-    
+    Sigma0 <- matrix(tauSq, nrow = nT, ncol = nT)
+    diag(Sigma0) <- tauSq + sigSq
+
     ##
-    Y.ki = matrix(NA, nrow = K, ncol = nT)
+    Y.ki <- matrix(NA, nrow = K, ncol = nT)
     for (k in 1:K) {
-        Y.ki[k, ] = rmvnorm(1, mean = eta.ki[k, ], sigma = Sigma0)
+      Y.ki[k, ] <- rmvnorm(1, mean = eta.ki[k, ], sigma = Sigma0)
     }
-  
+
     ##
     return(data.frame(
-        id = rep(1:K, rep(nT, K)),
-        X1 = X1.ki,
-        x2 = x2.ki,
-        Y = c(t(Y.ki))
+      id = rep(1:K, rep(nT, K)),
+      X1 = X1.ki,
+      x2 = x2.ki,
+      Y = c(t(Y.ki))
     ))
-}
+  }
 ```
 
 ```{r}
-K = 30
-nT = 4
-qX2 = 0.5
-betaV = c(0, 1, 1)
-sigSq = 0.5
-tauSq = 0.5
-  
-simData = genData_cor_balance(
+K <- 30
+nT <- 4
+qX2 <- 0.5
+betaV <- c(0, 1, 1)
+sigSq <- 0.5
+tauSq <- 0.5
+
+simData <- genData_cor_balance(
   K = 30,
   nT = 4,
   qX2 = 0.5,
