@@ -1,0 +1,174 @@
+---
+title: "Weights Components"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,
+                      message = FALSE,
+                      warning = FALSE,
+                      fig.width = 7,
+                      fig.height = 5)
+library(tidyverse)
+library(PracTools)
+```
+
+# General knowledge
+
+the goal of weighting is can provide approximately unbiased and consistent estimates of many different population quantities.
+
+the steps:
+
+* calculate the base weights (design weights)
+* adjusted by unknown eligibility
+* nonresponse adjustment
+* calibration to population values
+
+The product of four components is the final weight.
+
+$$
+w_i = d_{0i} *a_{1i} * a_{2i} * a_{3i}
+$$
+
+# Base weights
+
+$d_{0i}$ is introduced to account for the probability that a case was selected for the sample.
+
+$$
+d_{0i} = \frac{1}{\pi_i}
+$$
+
+The base weight is designed to address the issue of unequal probabilities of selection across individuals or units, thereby restoring the 
+representativeness of the sample to the target population. A higher weight indicates that the sampled unit represents a larger number of 
+individuals in the population.
+
+Sum of $d_{0i}$ should be equal to the total number of elements in the population
+
+commonly used base weights include:
+
+* SRS without replacement(epsem): $$ d_{0i} = \pi_i^{-1} = \frac{N}{n} $$
+* stratified SRS without replacement: $$ d_{0hi} = \pi_{hi}^{-1} = \frac{N_{h}}{n_{h}}$$
+* two-stage sampling leading to epsem: $$d_{0ij} = \pi_{ij}^{-1} = \frac{N}{m\bar{n}}$$
+* multistage sampling 
+
+
+# Adjusted by unknown eligibility
+
+
+
+# Nonresponse adjustment
+
+## weighting class adjustment
+
+## propensity score adjustment
+
+### propensity weighting
+
+### propensity stratification
+
+## classification algorithm
+
+### chi-square automatic interaction detection (CHAID)
+
+```{r}
+# import data
+data(smho98)
+?smho98
+
+# deal with data
+# PSYREHAB is the variable of interest
+# create a response indicator R
+smho98$R = 1
+smho98$R[is.na(smho98$PSYREHAB)==TRUE]=0
+smho98$stratum6 = cut(smho98$STRATUM,c(0,2,4,8,10,13,16),
+labels = 1:6)
+
+## install CHAID
+# Sys.setenv(PATH = paste("/opt/homebrew/bin", Sys.getenv("PATH"), sep = ":"))
+# Sys.which("gfortran")
+
+# install.packages("CHAID", repos="http://R-Forge.R-project.org", type = "source")
+# install.packages("partykit")
+# install.packages("CHAID", repos="http://R-Forge.R-project.org")
+library(CHAID)
+```
+
+```{r}
+# CHAID only allow categorical covariates
+smho98$beds_c = 
+    with(smho98, 
+        cut(BEDS,
+        breaks=quantile(BEDS,
+        probs=seq(0,1, by=0.25),
+        na.rm=TRUE),
+        include.lowest=TRUE))
+smho98$beds_c = factor(smho98$beds_c, labels=c("1","2","3","4") )
+
+smho98$exp_c = 
+    with(smho98, cut(EXPTOTAL,
+        breaks=quantile(EXPTOTAL),
+        include.lowest=TRUE))
+
+smho98$exp_c = factor(smho98$exp_c, labels=c("1","2","3","4") )
+
+smho98$SEENCNT_c = 
+    with(smho98, cut(SEENCNT,
+        breaks=quantile(SEENCNT,
+        probs=seq(0,1, by=0.25)),
+        include.lowest=TRUE))
+
+smho98$SEENCNT_c = factor(smho98$SEENCNT_c, labels=c("1","2","3","4") )
+```
+
+```{r}
+data.tree = 
+    smho98[,c("stratum6","beds_c","exp_c","SEENCNT_c","R")]
+data.tree = lapply(data.tree, factor)
+```
+
+```{r}
+## CHAID model
+set.seed(100)
+chaid.tree = chaid(R ~ ., data=data.tree)
+plot(chaid.tree)
+```
+
+```{r}
+# ## CHAID fitted values
+# chaid.fitted = chaid.tree$fitted
+# chaid.tbl = table(chaid.fitted[,1],chaid.fitted[,2])
+# chaid.prob = chaid.tbl[,2]/apply(chaid.tbl,1,sum)
+# chaid.level = as.numeric(rownames(chaid.tbl))
+# num.level = length(unique(chaid.level))
+
+# ## assign an individual weight to each respondent
+# smho98$chaid.wt = NA
+# for (c in 1:num.level) {
+# smho98$chaid.wt[chaid.fitted[,1]==chaid.level[c]]
+# = 1/chaid.prob[c]
+# }
+# ## check weights calculation
+# table(smho98$chaid.wt)
+# sum(smho98$chaid.wt[which(smho98$R==1)])
+```
+
+### classification and regression trees (CART)
+
+```{r}
+## create data
+data.tree = smho98[,c("stratum6","BEDS","EXPTOTAL",
+"SEENCNT","R")]
+
+## run CART model
+library(rpart)
+set.seed(100)
+cart.tree = rpart(R ~ .,data=data.tree, method = "class")
+
+# post(cart.tree, file = "tree.ps",
+# title = "Classification Tree for Nonresponse Adjustments")
+
+## CART fitted values and assign weights
+cart.fitted = predict(cart.tree, type="prob")
+data.tree$cart.wt = 1/cart.fitted[,2]
+sum(data.tree$cart.wt[data.tree$R==1])
+```
