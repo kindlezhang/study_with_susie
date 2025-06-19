@@ -1,0 +1,297 @@
+---
+title: "Untitled"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
+
+```{r}
+library(dplyr)
+library(tidyverse)
+library(survey)
+```
+
+```{r}
+## read in the data
+data = read.csv("data_file/example.csv")
+dim(data)
+```
+
+1. recording and rerun weighting method
+2. machine learning (probit bart, xgboost, super learner, etc.)
+3. hw
+4. replicate weight
+
+
+```{r}
+## gender - 1: male, 2: female
+## age_grp - 2: [18,40), 3: [40,60), 4: [60,75), 5: >=75
+## BMI_c - 1: <25, 2: [25, 30), 3: >=30    
+## race - 1: Mexican American, 2: Other Hispanic, 3: Non-Hispanic White, 4: Non-Hispanic Black, 6:Non-Hispanic Asian, 7: Other Race, Including Multi-Racial
+## citizen - 1: by birth or naturalization, 2: Not a citizen of the US 
+## educ - 1: high school graduate or less, 2: some college or associate's degree, 3: Bachelor’s degree, 4: Advanced degree
+## marital - 1: <= married 2: not married
+## income_grp - 1: Under $20,000 2: $20,000 to 74,999 3:$75,000 to $99,999, 4: >=$100,000
+## ALQ - 1: yes 2: no
+## smoke - 1: every day; 2: some days; 3: not at all
+## HBP - 1: yes, 2: no
+summary(data)
+```
+
+```{r}
+## transform categorical data into factor type
+data = data %>% 
+  mutate(
+    strata = as.factor(strata),
+    age_grp = as.factor(age_grp),
+    gender = as.factor(gender),
+    race = as.factor(race),
+    citizen = as.factor(citizen),
+    educ = as.factor(educ),
+    marital = as.factor(marital),
+    income_grp = as.factor(income_grp),
+    ALQ = as.factor(ALQ),
+    smoke = as.factor(smoke),
+    diabetes = as.factor(diabetes),
+    HBP = as.factor(HBP),
+    BMI_c =as.factor(BMI_c)
+  ) 
+```
+
+```{r}
+## build a logistic regression model for response indicator
+## BMI or BMI_c ?
+logit_model = glm((!is.na(HbA1c)) ~
+                  strata+age_grp+gender+race+citizen+educ+marital+income_grp+BMI+ALQ+smoke+HBP, 
+                  data = data, family = binomial(link = "logit"))
+summary(logit_model)
+```
+
+# inverse propensity score
+
+```{r}
+## propensity score weighting (psw)
+pw = predict(logit_model, newdata = data, type = "response")
+data$WT_psw = 1 / pw
+data$WT_psw[is.na(data$HbA1c)] = 0
+summary(data$WT_psw[!is.na(data$HbA1c)])
+```
+
+```{r}
+## Construct the new weight
+data$adjW_psw = data$weight * data$WT_psw
+summary(data$adjW_psw[!is.na(data$HbA1c)])
+```
+
+```{r}
+summary(data$weight)
+```
+
+# stratification 
+
+```{r}
+pw_class = cut(pw, breaks=quantile(pw,probs=seq(0,1, by=0.2)), 
+               include.lowest=TRUE, labels = c(1,2,3,4,5), dig.lab = 7)
+
+## Check balance within each group. The mean should be similar in each class for missing and observed outcome
+group_by(as.data.frame(list("pw" = pw, "pw_class" = pw_class, 
+                            "missing" = is.na(data$HbA1c))), 
+         pw_class, missing)  |>  summarise(n = length(pw), mean.ps = mean(pw))
+```
+
+```{r}
+## Estimated unweighted response rate in each stratum
+pw_rps = 
+    group_by(as.data.frame(list("pw_class" = pw_class, "weight" = data$weight, "missing" = is.na(data$HbA1c))), pw_class) %>% 
+  mutate(
+    group_n_sum = length(weight),
+    m = sum(1 - missing) / group_n_sum
+    ) %>% 
+  ungroup() %>% dplyr::select(m) %>% 
+  unlist(use.names = FALSE)
+data$WT_pss = 1 / pw_rps
+head(data)
+sort(unique(data$WT_pss))
+```
+
+```{r}
+## Estimated weighted response rate in each stratum
+pw_wrps = group_by(as.data.frame(list("pw_class" = pw_class, "weight" = data$weight, "missing" = is.na(data$HbA1c))), pw_class) %>% 
+  mutate(
+    group_n_sum = sum(weight),
+    m = sum((1 - missing)*weight) / group_n_sum
+    ) %>% 
+  ungroup() %>% dplyr::select(m) %>% 
+  unlist(use.names = FALSE)
+data$WT_wpss = 1 / pw_wrps
+head(data)
+sort(unique(data$WT_wpss))
+```
+
+```{r}
+## Construct the new weight using the unweighted response rate
+data$adjW_pss = data$weight * data$WT_pss
+head(data)
+summary(data$adjW_pss[!is.na(data$HbA1c)])
+summary(data$weight)
+```
+
+what‘s the difference between psw and pss?
+
+# Create adjustment cells using CHAID algorithm
+
+```{r}
+## The following four packages need to be installed before CHAID can be installed.
+#install.packages("mvtnorm")
+#install.packages("libcoin")
+#install.packages("inum")
+#install.packages("partykit")
+#install.packages("CHAID",repos="http://R-Forge.R-project.org")
+library(CHAID)
+set.seed(8123)
+chaidobj <- chaid(factor(!is.na(data$HbA1c)) ~ strata+age_grp+gender+race+citizen+educ+marital+income_grp+ALQ+smoke+HBP+BMI_c,data = data)
+print(chaidobj)
+```
+
+```{r}
+#plot(chaidobj)
+classes <- predict(chaidobj)
+group_by(as.data.frame(list("HbA1c"=data$HbA1c, "rclass" = attributes(classes)$names)), rclass) %>% 
+    summarise(n = length(HbA1c), miss=sum(is.na(HbA1c)==TRUE))
+```
+
+```{r}
+#### Calculate weight by using the unweighted response rate in each terminal node of the tree
+chaid_pw = data.frame(data, rclass = attributes(classes)$names) %>% 
+  group_by(rclass) %>% 
+  mutate(
+    m = sum(1 - is.na(HbA1c))/length(weight),
+  ) %>% 
+  ungroup() %>% dplyr::select(m) %>% unlist(use.names = FALSE)
+data$WT_chaid = 1 / chaid_pw
+head(data)
+sort(unique(data$WT_chaid))
+```
+
+```{r}
+## Construct the new weight
+data$adjW_chaid = data$weight * data$WT_chaid
+head(data)
+summary(data$adjW_chaid[!is.na(data$HbA1c)])
+```
+
+# cal propensity score by uesing machine learning packages
+
+## bart package probit
+
+```{r}
+library(BART)
+```
+
+```{r}
+# transfer Y to binary response indicator
+data$HbA1c_nonmissing = as.numeric(!is.na(data$HbA1c))
+
+# delete rows with missing values in the covariates
+bart_data = data[complete.cases(data[c("strata","age_grp","gender","race","citizen",
+                                       "educ","marital","income_grp","BMI","ALQ","smoke","HBP")]), ]
+
+y_train = bart_data$HbA1c_nonmissing
+X_train = bart_data[, c("strata","age_grp","gender","race","citizen",
+                        "educ","marital","income_grp","BMI","ALQ","smoke","HBP")]
+
+# use Probit BART
+fit_bart = pbart(x.train = X_train, y.train = y_train)
+str(y_train)
+str(X_train)
+str(fit_bart)
+fit_bart$prob.train.mean
+```
+
+```{r}
+data$WT_probit = 1 / fit_bart$prob.train.mean
+data$WT_probit[is.na(data$HbA1c)] = 0
+summary(data$WT_probit[!is.na(data$HbA1c)])
+```
+
+```{r}
+## Construct the new weight
+data$adjW_probit = data$weight * data$WT_probit
+summary(data$adjW_probit[!is.na(data$HbA1c)])
+head(data)
+```
+
+## xgboost package
+
+Gradient Boosting Machine
+
+ gradient-boosted decision tree
+
+```{r}
+library(xgboost)
+
+# Prepare data for xgboost
+predictors = c("strata", "age_grp", "gender", "race", "citizen",
+               "educ", "marital", "income_grp", "BMI", "ALQ", "smoke", "HBP")
+model_data = data %>%
+  select(all_of(c(predictors, "HbA1c_nonmissing"))) %>%
+  na.omit()  
+
+# Convert categorical variables to factors
+y = model_data$HbA1c_nonmissing
+X = model.matrix(~ . -1, data = model_data %>% select(-HbA1c_nonmissing))  
+
+
+dtrain = xgb.DMatrix(data = X, label = y)
+```
+
+```{r}
+# Train the XGBoost model
+xgb_fit = xgboost(data = dtrain,
+                  objective = "binary:logistic",
+                  nrounds = 100,
+                  max_depth = 3,
+                  eta = 0.1,
+                  verbose = 0)
+```
+
+```{r}
+pred_probs = predict(xgb_fit, newdata = dtrain)
+head(pred_probs)
+pred_probs
+```
+
+```{r}
+data$WT_xgboost = 1 / pred_probs
+data$WT_xgboost[is.na(data$HbA1c)] = 0
+summary(data$WT_xgboost[!is.na(data$HbA1c)])
+```
+
+```{r}
+## Construct the new weight
+data$adjW_xgboost = data$weight * data$WT_xgboost
+summary(data$adjW_xgboost[!is.na(data$HbA1c)])
+head(data)
+```
+
+## super learner package
+
+```{r}
+library(SuperLearner)
+```
+
+```{r}
+
+```
+
+# Weight trimming
+
+```{r}
+#### Trim the weight to 3 times of mean weight
+data.complete = data[is.na(data$HbA1c)==FALSE,]
+head(data.complete)
+des_psw = svydesign(data=data.complete, ids=~1, strata=~strata, weights=~adjW_psw)
+summary(weights(des_psw))
+```

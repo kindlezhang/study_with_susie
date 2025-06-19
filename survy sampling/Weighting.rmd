@@ -134,22 +134,22 @@ plot(chaid.tree)
 ```
 
 ```{r}
-# ## CHAID fitted values
-# chaid.fitted = chaid.tree$fitted
-# chaid.tbl = table(chaid.fitted[,1],chaid.fitted[,2])
-# chaid.prob = chaid.tbl[,2]/apply(chaid.tbl,1,sum)
-# chaid.level = as.numeric(rownames(chaid.tbl))
-# num.level = length(unique(chaid.level))
+## CHAID fitted values
+chaid.fitted = chaid.tree$fitted
+chaid.tbl = table(chaid.fitted[,1],chaid.fitted[,2])
+chaid.prob = chaid.tbl[,2]/apply(chaid.tbl,1,sum)
+chaid.level = as.numeric(rownames(chaid.tbl))
+num.level = length(unique(chaid.level))
 
-# ## assign an individual weight to each respondent
-# smho98$chaid.wt = NA
-# for (c in 1:num.level) {
-# smho98$chaid.wt[chaid.fitted[,1]==chaid.level[c]]
-# = 1/chaid.prob[c]
-# }
-# ## check weights calculation
-# table(smho98$chaid.wt)
-# sum(smho98$chaid.wt[which(smho98$R==1)])
+## assign an individual weight to each respondent
+smho98$chaid.wt = NA
+for (c in 1:num.level) {
+smho98$chaid.wt[chaid.fitted[,1]==chaid.level[c]] = 1/chaid.prob[c]
+}
+
+## check weights calculation
+table(smho98$chaid.wt)
+sum(smho98$chaid.wt[which(smho98$R==1)])
 ```
 
 ### classification and regression trees (CART)
@@ -171,4 +171,158 @@ cart.tree = rpart(R ~ .,data=data.tree, method = "class")
 cart.fitted = predict(cart.tree, type="prob")
 data.tree$cart.wt = 1/cart.fitted[,2]
 sum(data.tree$cart.wt[data.tree$R==1])
+```
+
+## svydesign
+
+Specify a complex survey design
+
+`dsclus <-svydesign(id = ~PSU, strata = ~stratum, weights = ~weight, fpc=~fpc, data = data, nest = TRUE)`
+id is cluster, strata is strata, nest enforces cluster ids to nest within strata, fpc = population size
+
+```{r}
+library(survey)
+data(api)
+```
+
+A SRS sample (n = 200) from 6198 schools
+
+```{r}
+srs_design <- svydesign(id=~1,fpc=~fpc, data=apisrs) ## id here means there is no clustering
+srs_design
+svytotal(~enroll, srs_design)
+svymean(~enroll, srs_design)
+
+# check by apipop
+sum(apipop$enroll,na.rm=TRUE)
+mean(apipop$enroll,na.rm=TRUE)
+```
+
+A stratified design by stype (n1 = 100 from 4,421 elementary schools, n2 = 50 from 1018 middle schools, n3 = 50 from 755 high schools)
+
+```{r}
+strat_design <- svydesign(id=~1, strata=~stype, fpc=~fpc, data=apistrat)
+strat_design
+svytotal(~enroll, strat_design)
+svymean(~enroll, strat_design)
+
+# check by apipop
+sum(apipop$enroll,na.rm=TRUE)
+mean(apipop$enroll,na.rm=TRUE)
+```
+
+Two-stage cluster sample of 40 districts from 757 districts in the population and subsample of schools from each 
+selected district, yielding a sample of 126 schools:
+
+```{r}
+## PSU: districts SSU: schools
+dclus2<-svydesign(id=~dnum+snum, fpc=~fpc1+fpc2, data=apiclus2)
+summary(dclus2)
+svytotal(~enroll, dclus2, na.rm = TRUE)
+svymean(~api00, dclus2)
+
+# check by apipop
+sum(apipop$enroll,na.rm=TRUE)
+mean(apipop$enroll,na.rm=TRUE)
+```
+
+Repeat the analysis of the two-stage cluster sample using weights information, ignoring the finite population correction
+
+```{r}
+dclus2wr<-svydesign(id=~dnum+snum, weights=~pw, data=apiclus2)
+summary(dclus2wr)
+svytotal(~enroll, dclus2wr, na.rm=TRUE)
+svymean(~api00, dclus2wr)
+
+# check by apipop
+sum(apipop$enroll,na.rm=TRUE)
+mean(apipop$enroll,na.rm=TRUE)
+```
+
+One-stage cluster sample of 15 districts from 757 districts and include all schools in the selected districts, yielding a sample of 183 schools:
+
+```{r}
+dclus1<-svydesign(id=~dnum, data=apiclus1, fpc=~fpc)
+summary(dclus1)
+
+svytotal(~enroll, dclus1, na.rm=TRUE)
+svymean(~api00, dclus1)
+
+# check by apipop
+sum(apipop$enroll,na.rm=TRUE)
+mean(apipop$enroll,na.rm=TRUE)
+```
+
+# Poststratification and Raking
+
+```{r}
+library(survey)
+data(api)
+dclus1<-svydesign(id=~dnum, weights=~pw, data=apiclus1, fpc=~fpc)
+svymean(~api00, dclus1)
+svytable(~stype, dclus1, round=TRUE)
+```
+
+```{r}
+## population totals
+pop.types <- data.frame(stype=c("E","H","M"), Freq=c(4421,755,1018))
+```
+
+```{r}
+## Poststratification
+dclus1p <- postStratify(dclus1, ~stype, pop.types)
+svymean(~api00, dclus1p)
+
+## Weighted totals
+svytable(~stype, dclus1p, round=TRUE)
+```
+
+## Raking ratio estimation
+
+only the marginal population totals are known
+
+use IPF (iterative Proportional Fitting)
+
+```{r}
+library(survey)
+data(api)
+dclus1 <- svydesign(id=~dnum, weights=~pw, data=apiclus1, fpc=~fpc)
+rclus1 <- as.svrepdesign(dclus1)
+svymean(~api00, rclus1)
+```
+
+```{r}
+## population marginal totals
+pop.types <- data.frame(stype=c("E","H","M"), Freq=c(4421,755,1018))
+pop.schwide <- data.frame(sch.wide=c("No","Yes"), Freq=c(1072,5122))
+```
+
+```{r}
+## Raking
+rclus1r <- rake(rclus1, list(~stype,~sch.wide), list(pop.types, pop.schwide))
+svymean(~api00, rclus1r)
+```
+
+Sample weighted marginal totals correspond to population
+
+```{r}
+xtabs(~stype, apipop)
+svytable(~stype, rclus1r, round=TRUE)
+xtabs(~sch.wide, apipop)
+svytable(~sch.wide, rclus1r, round=TRUE)
+```
+
+Sample weighted joint totals don’t correspond to population
+
+```{r}
+xtabs(~stype+sch.wide, apipop)
+svytable(~stype+sch.wide, rclus1r, round=TRUE)
+```
+
+## weight trimming
+
+```{r}
+summary(weights(dclus1p))
+dclus1pt <- trimWeights(dclus1p, upper = 50, strict = TRUE)
+summary(weights(dclus1pt))
 ```
