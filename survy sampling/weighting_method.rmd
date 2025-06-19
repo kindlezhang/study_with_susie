@@ -295,3 +295,127 @@ head(data.complete)
 des_psw = svydesign(data=data.complete, ids=~1, strata=~strata, weights=~adjW_psw)
 summary(weights(des_psw))
 ```
+
+```{r}
+summary(data$weight)
+```
+
+```{r}
+sum(weights(des_psw))
+```
+
+```{r}
+des_psw_trim = trimWeights(des_psw, upper = 3*mean(weights(des_psw)), strict = TRUE)
+summary(weights(des_psw_trim))
+```
+
+```{r}
+sum(weights(des_psw_trim))
+```
+
+# Post-stratification
+
+```{r}
+## post-stratification is useful when the sample is different from the population and we have the 
+## population data of joint distribution of the auxiliary variables. To implement the post-stratification 
+## method, we first download a data set from the Census of Bureau website, which contains the counts of joint 
+## distribution of age, sex, education for U.S. population in 2017: 
+## https://www.census.gov/data/tables/2017/demo/age-and-sex/2017-age-sex-composition.html
+
+## read in the population data and create a data that can be used in the post-stratification. 
+## All the covariates that are used in the post-stratification need to have the same definition of 
+## categories between the survey data and the population data. 
+
+library("readxl")
+library(tidyverse)
+pop_male = read_excel("./data_file/2017gender.xls", sheet = 1, range = "A9:F22", 
+                      col_names = c("Age", "Less than high school", "High school graduate", 
+                      "Some college or associate's degree", "Bachelor’s degree", "Advanced degree"))
+pop_female = read_excel("./data_file/2017gender.xls", sheet = 1, range = "A25:F38", col_names = c("Age", 
+                        "Less than high school", "High school graduate", 
+                        "Some college or associate's degree", 
+                        "Bachelor’s degree", "Advanced degree"))
+pop_male = mutate(pop_male, gender = "Male")
+pop_female = mutate(pop_female, gender = "Female")
+head(pop_female)
+```
+
+```{r}
+pop = bind_rows(pop_male, pop_female) %>% 
+    pivot_longer(
+    cols = c("Less than high school", "High school graduate", "Some college or associate's degree",  
+             "Bachelor’s degree", "Advanced degree"),
+    names_to = "educ",
+    values_to = "Freq"
+  ) %>% 
+  mutate(
+    educ = if_else(educ == "Less than high school" | educ == "High school graduate", 
+                   "High school graduate or less", educ),
+    age = if_else(Age == ".18 to 24 years" | Age == ".25 to 29 years" | Age == ".30 to 34 years" | 
+                    Age == ".35 to 39 years", "18 to 39 years", Age),
+    age = if_else(Age == ".40 to 44 years" | Age == ".45 to 49 years" | Age == ".50 to 54 years" | 
+                    Age == ".55 to 59 years", "40 to 59 years", age),
+    age = if_else(Age == ".60 to 64 years" | Age == ".65 to 69 years" | Age == ".70 to 74 years", 
+                  "60 to 74 years", age),
+    age = if_else(Age == ".75 to 79 years" | Age == ".80 to 84 years" | Age == ".85 years and over", 
+                  "75 years and above", age),
+    age_grp = age
+  ) %>% 
+  mutate(
+    gender = factor(gender, levels = c("Male", "Female")),
+    age_grp = factor(age_grp, levels = c("less than 18 years", "18 to 39 years", "40 to 59 years", 
+                                         "60 to 74 years", "75 years and above")),
+    educ = factor(educ, levels = c("High school graduate or less", "Some college or associate's degree",
+                                   "Bachelor’s degree", "Advanced degree"))
+  ) %>% 
+  dplyr::select(-Age, -age, gender, age_grp, educ, Freq)
+  
+head(pop)
+```
+
+```{r}
+##### transform population data into the same format as survey data
+pop.trans = pop %>% 
+  mutate(
+    gender = as.factor(as.integer(gender)),
+    age_grp = factor(as.integer(age_grp), levels = seq(1, 5)),
+    educ = as.factor(as.integer(educ))
+  )
+
+pop.trans$Freq=pop.trans$Freq*1000
+
+pop.sum = group_by(as.data.frame(list("Freq"=pop.trans$Freq, "gender" = pop.trans$gender, "educ"=pop.trans$educ, "age_grp"=pop.trans$age_grp)), educ, age_grp, gender) %>% 
+    summarise(Freq = sum(Freq))
+sum(pop.sum$Freq)
+```
+
+```{r}
+#### poststratification on the top of the weights created using the propensity score weighting method
+des_psw_p = postStratify(des_psw_trim, ~educ + age_grp + gender, pop.sum)
+summary(weights(des_psw_p))
+```
+
+```{r}
+sum(weights(des_psw_p))
+```
+
+# Raking
+
+```{r}
+## Raking is commonly used in surveys to correct for selection bias. Different from post-stratification 
+## that requires the joint distribution of covariates in the population, raking only requires the marginal 
+## distribution of these covariates to be known. 
+
+### marginal distributions with transformed population data
+pop.gender = pop.trans %>% group_by(gender) %>% summarise(Freq = sum(Freq))
+pop.age_grp = pop.trans %>% group_by(age_grp) %>% summarise(Freq = sum(Freq))
+pop.educ = pop.trans %>% group_by(educ) %>% summarise(Freq = sum(Freq))
+
+#### raking on the top of the weights created using the propensity score stratification method
+des_psw_r = rake(des_psw_trim, list(~gender,~age_grp,~educ), list(pop.gender, pop.age_grp, pop.educ))
+summary(weights(des_psw_r))
+```
+
+```{r}
+sum(weights(des_psw_r))
+```
