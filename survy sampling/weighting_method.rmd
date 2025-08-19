@@ -387,6 +387,7 @@ pop.trans$Freq=pop.trans$Freq*1000
 pop.sum = group_by(as.data.frame(list("Freq"=pop.trans$Freq, "gender" = pop.trans$gender, "educ"=pop.trans$educ, "age_grp"=pop.trans$age_grp)), educ, age_grp, gender) %>% 
     summarise(Freq = sum(Freq))
 sum(pop.sum$Freq)
+# write.csv(pop.sum, file = "data_file/population.csv", row.names = FALSE)
 ```
 
 ```{r}
